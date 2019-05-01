@@ -659,7 +659,7 @@ func (raw Raw) Unmarshal(out interface{}) (err error) {
 		fallthrough
 	case reflect.Map:
 		d := newDecoder(raw.Data)
-		good := d.readElemTo(v, raw.Kind)
+		good := d.readElemTo(v, raw.Kind, nil)
 		if !good {
 			return &TypeError{v.Type(), raw.Kind}
 		}
@@ -700,6 +700,7 @@ type fieldInfo struct {
 	Key       string
 	Num       int
 	OmitEmpty bool
+	ObjectId  bool
 	MinSize   bool
 	Inline    []int
 }
@@ -764,6 +765,8 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 					info.MinSize = true
 				case "inline":
 					inline = true
+				case "objectid":
+					info.ObjectId = true
 				default:
 					msg := fmt.Sprintf("Unsupported flag %q in tag %q of type %s", flag, tag, st)
 					panic(externalPanic(msg))

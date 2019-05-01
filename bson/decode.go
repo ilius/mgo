@@ -243,7 +243,7 @@ func (d *decoder) readDocTo(out reflect.Value) {
 		switch outk {
 		case reflect.Map:
 			e := reflect.New(elemType).Elem()
-			if d.readElemTo(e, kind) {
+			if d.readElemTo(e, kind, nil) {
 				k := reflect.ValueOf(name)
 				if convertKey {
 					mapKeyType := out.Type().Key()
@@ -288,7 +288,7 @@ func (d *decoder) readDocTo(out reflect.Value) {
 		case reflect.Struct:
 			if info, ok := fieldsMap[name]; ok {
 				if info.Inline == nil {
-					d.readElemTo(out.Field(info.Num), kind)
+					d.readElemTo(out.Field(info.Num), kind, &info)
 				} else {
 					f, err := safeFieldByIndex(out, info.Inline)
 					if err != nil {
@@ -306,13 +306,13 @@ func (d *decoder) readDocTo(out reflect.Value) {
 						// retry now
 						f, err = safeFieldByIndex(out, info.Inline)
 						if err == nil {
-							d.readElemTo(f, kind)
+							d.readElemTo(f, kind, nil)
 						} else {
 							d.dropElem(kind)
 						}
 
 					} else {
-						d.readElemTo(f, kind)
+						d.readElemTo(f, kind, nil)
 					}
 				}
 			} else if inlineMap.IsValid() {
@@ -320,7 +320,7 @@ func (d *decoder) readDocTo(out reflect.Value) {
 					inlineMap.Set(reflect.MakeMap(inlineMap.Type()))
 				}
 				e := reflect.New(elemType).Elem()
-				if d.readElemTo(e, kind) {
+				if d.readElemTo(e, kind, nil) {
 					inlineMap.SetMapIndex(reflect.ValueOf(name), e)
 				}
 			} else {
@@ -370,7 +370,7 @@ func (d *decoder) readArrayDocTo(out reflect.Value) {
 			corrupted()
 		}
 		d.i++
-		d.readElemTo(out.Index(i), kind)
+		d.readElemTo(out.Index(i), kind, nil)
 		if d.i >= end {
 			corrupted()
 		}
@@ -411,7 +411,7 @@ func (d *decoder) readSliceDoc(t reflect.Type) interface{} {
 		}
 		d.i++
 		e := reflect.New(elemType).Elem()
-		if d.readElemTo(e, kind) {
+		if d.readElemTo(e, kind, nil) {
 			tmp = append(tmp, e)
 		}
 		if d.i >= end {
@@ -586,7 +586,7 @@ func (d *decoder) readDocElems(typ reflect.Type) reflect.Value {
 	d.readDocWith(func(kind byte, name string) {
 		e := DocElem{Name: name}
 		v := reflect.ValueOf(&e.Value)
-		if d.readElemTo(v.Elem(), kind) {
+		if d.readElemTo(v.Elem(), kind, nil) {
 			slice = append(slice, e)
 		}
 	})
@@ -649,7 +649,7 @@ func (d *decoder) dropElem(kind byte) {
 // Attempt to decode an element from the document and put it into out.
 // If the types are not compatible, the returned ok value will be
 // false and out will be unchanged.
-func (d *decoder) readElemTo(out reflect.Value, kind byte) (good bool) {
+func (d *decoder) readElemTo(out reflect.Value, kind byte, info *fieldInfo) (good bool) {
 	outt := out.Type()
 
 	if outt == typeRaw {
@@ -840,6 +840,18 @@ func (d *decoder) readElemTo(out reflect.Value, kind byte) (good bool) {
 		out.Set(inv)
 		return true
 	case reflect.String:
+		if inv.Type() == typeObjectId {
+			if info != nil && info.ObjectId {
+				inObjId, ok := inv.Interface().(ObjectId)
+				if ok {
+					out.SetString(inObjId.Hex())
+					return true
+				}
+				// should we panic on else?
+			}
+			out.SetString(inv.String())
+			return true
+		}
 		switch inv.Kind() {
 		case reflect.String:
 			out.SetString(inv.String())

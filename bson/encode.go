@@ -203,7 +203,7 @@ func (e *encoder) addDoc(v reflect.Value) {
 
 func (e *encoder) addMap(v reflect.Value) {
 	for _, k := range v.MapKeys() {
-		e.addElem(fmt.Sprint(k), v.MapIndex(k), false)
+		e.addElem(fmt.Sprint(k), v.MapIndex(k), nil)
 	}
 }
 
@@ -221,7 +221,7 @@ func (e *encoder) addStruct(v reflect.Value) {
 				if _, found := sinfo.FieldsMap[ks]; found {
 					panic(fmt.Sprintf("Can't have key %q in inlined map; conflicts with struct field", ks))
 				}
-				e.addElem(ks, m.MapIndex(k), false)
+				e.addElem(ks, m.MapIndex(k), nil)
 			}
 		}
 	}
@@ -248,10 +248,10 @@ func (e *encoder) addStruct(v reflect.Value) {
 		if useRespectNilValues &&
 			(value.Kind() == reflect.Slice || value.Kind() == reflect.Map) &&
 			value.IsNil() {
-			e.addElem(info.Key, reflect.ValueOf(nil), info.MinSize)
+			e.addElem(info.Key, reflect.ValueOf(nil), &info)
 			continue
 		}
-		e.addElem(info.Key, value, info.MinSize)
+		e.addElem(info.Key, value, &info)
 	}
 }
 
@@ -311,13 +311,13 @@ func (e *encoder) addSlice(v reflect.Value) {
 	vi := v.Interface()
 	if d, ok := vi.(D); ok {
 		for _, elem := range d {
-			e.addElem(elem.Name, reflect.ValueOf(elem.Value), false)
+			e.addElem(elem.Name, reflect.ValueOf(elem.Value), nil)
 		}
 		return
 	}
 	if d, ok := vi.(RawD); ok {
 		for _, elem := range d {
-			e.addElem(elem.Name, reflect.ValueOf(elem.Value), false)
+			e.addElem(elem.Name, reflect.ValueOf(elem.Value), nil)
 		}
 		return
 	}
@@ -326,19 +326,19 @@ func (e *encoder) addSlice(v reflect.Value) {
 	if et == typeDocElem {
 		for i := 0; i < l; i++ {
 			elem := v.Index(i).Interface().(DocElem)
-			e.addElem(elem.Name, reflect.ValueOf(elem.Value), false)
+			e.addElem(elem.Name, reflect.ValueOf(elem.Value), nil)
 		}
 		return
 	}
 	if et == typeRawDocElem {
 		for i := 0; i < l; i++ {
 			elem := v.Index(i).Interface().(RawDocElem)
-			e.addElem(elem.Name, reflect.ValueOf(elem.Value), false)
+			e.addElem(elem.Name, reflect.ValueOf(elem.Value), nil)
 		}
 		return
 	}
 	for i := 0; i < l; i++ {
-		e.addElem(itoa(i), v.Index(i), false)
+		e.addElem(itoa(i), v.Index(i), nil)
 	}
 }
 
@@ -351,7 +351,11 @@ func (e *encoder) addElemName(kind byte, name string) {
 	e.addBytes(0)
 }
 
-func (e *encoder) addElem(name string, v reflect.Value, minSize bool) {
+func (e *encoder) addElem(name string, v reflect.Value, info *fieldInfo) {
+	minSize := false
+	if info != nil {
+		minSize = info.MinSize
+	}
 
 	if !v.IsValid() {
 		e.addElemName(0x0A, name)
@@ -363,20 +367,44 @@ func (e *encoder) addElem(name string, v reflect.Value, minSize bool) {
 		if err != nil {
 			panic(err)
 		}
-		e.addElem(name, reflect.ValueOf(getv), minSize)
+		e.addElem(name, reflect.ValueOf(getv), info)
 		return
 	}
 
 	switch v.Kind() {
 
 	case reflect.Interface:
-		e.addElem(name, v.Elem(), minSize)
+		e.addElem(name, v.Elem(), info)
 
 	case reflect.Ptr:
-		e.addElem(name, v.Elem(), minSize)
+		switch v.Elem().Kind() {
+		case reflect.String:
+			if info != nil && info.ObjectId {
+				s := v.Elem().String()
+				if IsObjectIdHex(s) {
+					objId := ObjectIdHex(s)
+					e.addElemName(0x07, name)
+					e.addBytes([]byte(string(objId))...)
+					break
+				}
+				// should we panic on else?
+			}
+		}
+		e.addElem(name, v.Elem(), info)
 
 	case reflect.String:
 		s := v.String()
+
+		if info != nil && info.ObjectId {
+			if IsObjectIdHex(s) {
+				objId := ObjectIdHex(s)
+				e.addElemName(0x07, name)
+				e.addBytes([]byte(string(objId))...)
+				break
+			}
+			// should we panic on else?
+		}
+
 		switch v.Type() {
 		case typeObjectId:
 			if len(s) != 12 {
